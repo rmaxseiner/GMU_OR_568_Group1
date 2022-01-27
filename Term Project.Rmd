@@ -1,0 +1,97 @@
+---
+title: "Term Project"
+author: "Group 1"
+date: "1/25/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r data_analysis_boxplot}
+library(knitr)
+library(corrplot)
+library(mlbench)
+library(caret)
+library(e1071)
+library(ggplot2)
+
+data(PimaIndiansDiabetes)
+
+summary(PimaIndiansDiabetes)
+
+predictors <- PimaIndiansDiabetes[ , -(9)]
+
+boxplot(predictors)
+
+boxplot(predictors[,-c(5, 1, 7)]) # Glucose looks normal, Blood pressure normal but with outliers, skin thickness skewed positive 
+boxplot(predictors[,c(1)]) # Skewed positive
+boxplot(predictors[,(7)]) # Heavily Skewed positive
+boxplot(predictors[,(5)]) # Heavily Skewed positive
+```
+Just for visual review right now.  Numerical analysis of skewness and outliers below.
+
+```{r data_analysis_nearzero}
+# no near zero variance predictors
+print(nearZeroVar(predictors))
+```
+No near Zero predictors... clear from the visual inspection but good to have a mathematical confirmation.
+
+```{r data_analysis_correlation}
+pairs(predictors)
+
+cor( predictors )
+
+# Use the "corrplot" command:
+corrplot( cor( predictors ))
+```
+None of the predictors are significantly correlated. Age and Pregnancy are somewhat correlated as is to be expected. 
+
+```{r data_analysis_skewness}
+Skewness <- apply( predictors, 2, skewness )
+
+Outliers <- c()
+SkewnessQ <- c()
+for (i in 1:ncol(predictors)) {
+  BoxPlot = boxplot(predictors[,i], plot=FALSE)
+  if (length(BoxPlot$out) > 0) { 
+    Outliers = append(Outliers, "Yes")}
+  else {
+    Outliers = append(Outliers, "No")}
+  if (abs(Skewness[i]) < .5) { 
+    SkewnessQ = append(SkewnessQ, "None")}
+  else if (abs(Skewness[i]) >= .5 & (abs(Skewness[i]) < 1)){ 
+    SkewnessQ = append(SkewnessQ, "Moderate")}
+  else {
+    SkewnessQ = append(SkewnessQ, "High")
+  }
+  
+}
+
+characteristics = data.frame(Skewness, SkewnessQ, Outliers)
+
+kable(characteristics, format = "markdown", col.names = c("Skewness", "Skewness Level", "Contains Outliers"))
+```
+There are significant outliers on all the predictors and some are heavily skewed.  
+
+```{r data_analysis_boxcox}
+predictorPP <- preProcess(predictors, c("BoxCox", "center", "scale"))
+
+predictorPP$method$BoxCox
+
+predictorPP$bc$DiabetesPedigreeFunction
+predictorPP$bc$Age
+```
+BoxCox results are difficult to interpret.  I understand if I had one predictor that the lambda value is the power on the outcome but in this case we have multiple predictors and the outcome is categorical.  Does that mean the lambda is the power of the predictor? I need more investigation.
+
+```{r data_analysis_pca}
+Pimapca <- prcomp(predictors,center = TRUE, scale. = TRUE)
+
+summary(Pimapca)
+
+Pimapca
+
+
+
+```
