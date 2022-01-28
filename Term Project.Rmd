@@ -29,6 +29,8 @@ boxplot(predictors[,-c(5, 1, 7)]) # Glucose looks normal, Blood pressure normal 
 boxplot(predictors[,c(1)]) # Skewed positive
 boxplot(predictors[,(7)]) # Heavily Skewed positive
 boxplot(predictors[,(5)]) # Heavily Skewed positive
+
+
 ```
 Just for visual review right now.  Numerical analysis of skewness and outliers below.
 
@@ -72,7 +74,24 @@ for (i in 1:ncol(predictors)) {
 characteristics = data.frame(Skewness, SkewnessQ, Outliers)
 
 kable(characteristics, format = "markdown", col.names = c("Skewness", "Skewness Level", "Contains Outliers"))
+
+
+hist(predictors$pressure)
 ```
+Looks like if we took care of the 0 values this would be a pretty normal distribution
+
+```{r data_histograms_pedigree}
+hist(predictors$pedigree)
+hist(log(predictors$pedigree))
+```
+Looks like taking the log of this would make a normal distribution
+
+```{r data_histograms_age}
+hist(predictors$age)
+
+```
+Not sure what transformation can make this more normal...
+
 There are significant outliers on all the predictors and some are heavily skewed.  
 
 ```{r data_analysis_boxcox}
@@ -80,8 +99,8 @@ predictorPP <- preProcess(predictors, c("BoxCox", "center", "scale"))
 
 predictorPP$method$BoxCox
 
-predictorPP$bc$DiabetesPedigreeFunction
-predictorPP$bc$Age
+predictorPP$bc$pedigree
+predictorPP$bc$age
 ```
 BoxCox results are difficult to interpret.  I understand if I had one predictor that the lambda value is the power on the outcome but in this case we have multiple predictors and the outcome is categorical.  Does that mean the lambda is the power of the predictor? I need more investigation.
 
