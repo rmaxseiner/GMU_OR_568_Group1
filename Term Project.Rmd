@@ -22,6 +22,27 @@ data(PimaIndiansDiabetes)
 summary(PimaIndiansDiabetes)
 
 predictors <- PimaIndiansDiabetes[ , -(9)]
+```
+
+
+```{r data_analysis_remove_zero_values}
+hist(predictors$pressure)
+
+predictors[predictors$pressure == 0,]$pressure = mean(predictors$pressure)
+hist(predictors$pressure)
+
+hist(predictors$insulin)
+predictors[predictors$insulin == 0,]$insulin = mean(predictors$insulin)
+hist(predictors$insulin)
+
+hist(predictors$triceps)
+predictors[predictors$triceps == 0,]$triceps = mean(predictors$triceps)
+hist(predictors$triceps)
+
+hist(predictors$mass)
+predictors[predictors$mass == 0,]$mass = mean(predictors$mass)
+hist(predictors$mass)
+
 
 boxplot(predictors)
 
@@ -76,7 +97,9 @@ characteristics = data.frame(Skewness, SkewnessQ, Outliers)
 kable(characteristics, format = "markdown", col.names = c("Skewness", "Skewness Level", "Contains Outliers"))
 
 
-hist(predictors$pressure)
+
+
+
 ```
 Looks like if we took care of the 0 values this would be a pretty normal distribution
 
@@ -95,12 +118,16 @@ Not sure what transformation can make this more normal...
 There are significant outliers on all the predictors and some are heavily skewed.  
 
 ```{r data_analysis_boxcox}
-predictorPP <- preProcess(predictors, c("BoxCox", "center", "scale"))
+predictorPPFit <- preProcess(predictors, c("BoxCox", "center", "scale"))
 
-predictorPP$method$BoxCox
+predictorPPFit
 
-predictorPP$bc$pedigree
-predictorPP$bc$age
+predictorPPFit$method$BoxCox
+
+predictorPPFit$bc$pedigree
+predictorPPFit$bc$age
+
+predictorPP = predict(predictorPPFit, predictors)
 ```
 BoxCox results are difficult to interpret.  I understand if I had one predictor that the lambda value is the power on the outcome but in this case we have multiple predictors and the outcome is categorical.  Does that mean the lambda is the power of the predictor? I need more investigation.
 
