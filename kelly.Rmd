@@ -1,0 +1,608 @@
+---
+title: "OR 568 Project"
+author: "Kelly Johnson"
+date: "2/7/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries, include=FALSE}
+if (!require(AppliedPredictiveModeling)) install.packages
+('AppliedPredictiveModeling')
+if (!require(caret)) install.packages('caret')
+if (!require(pls)) install.packages('pls')
+if (!require(stats)) install.packages('stats')
+if (!require(dplyr)) install.packages('dplyr')
+if (!require(tidyverse)) install.packages('tidyverse')
+if (!require(mlbench)) install.packages('mlbench')
+if (!require(summarytools)) install.packages('summarytools')
+if (!require(corrplot)) install.packages('corrplot')
+if (!require(gridExtra)) install.packages('gridExtra')
+if (!require(timeDate)) install.packages('TimeDate')
+if (!require(pROC)) install.packages('pROC')
+if (!require(caTools)) install.packages('caTools')
+if (!require(rpart.plot)) install.packages('rpart.plot')
+if (!require(e1071)) install.packages('e1071')
+if (!require(MASS)) install.packages('MASS')
+if (!require(glmnet)) install.packages('glm')
+if (!require(pander)) install.packages('pander')
+if (!require(elasticnet)) install.packages('elasticnet')
+if (!require(lars)) install.packages('lars')
+if (!require(parallel)) install.packages('parallel')
+if (!require(doParallel)) install.packages('doParallel')
+if (!require(MLeval)) install.packages('MLeval')
+```
+# LOAD AND PREPROCESS
+
+## Load Data to use and perform preliminary exploration
+```{r load, fig.width=8, fig.height=4}
+data(PimaIndiansDiabetes)
+dat <- PimaIndiansDiabetes
+str(dat)
+summary(dat)
+
+#Isolate the response
+x <- dat[ , -(9)]
+y <- dat[,9]
+table(y)
+
+#Box Plots 
+featurePlot(x = x, 
+            y = y, 
+            plot = "box", 
+            scales = list(y = list(relation="free"),
+                          x = list(rot = 90)),  
+            layout = c(4,2 ), 
+            auto.key = list(columns = 4))
+```
+
+
+**There are 768 samples, 8 potential predictors that are numeric and 1 categorical response with two classes:**
+
+* diabetes
+    + 1 - "pos" (has diabetes)
+    + 2 - "neg" (does not have diabetes)
+
+## Check for near zero variance
+```{r nearzero}
+nearZeroVar(x)
+```
+
+**There is no near zero variances**
+
+
+## Check for correlated Predictors
+```{r correlated}
+corrplot(cor(x), method= "number")
+
+findCorrelation(cor(x), cutoff = .55)
+
+```
+
+
+**There is no correlation between predictors with a pearsons coefficient greater than 0.55. Age and pregnant have the lowest and insignificant correlation coefficient.**
+
+
+## Check for linear depencencies
+```{r ld}
+findLinearCombos(x)
+```
+
+
+**There are no linear dependencies for the predictors.**
+
+
+
+## Count Zeros by column
+```{r zerocount}
+#Count the number of zeros per column
+zerobycolumn <-colSums(dat==0)
+zerobycolumn
+```
+
+
+**There is a lot of zeros. Pregnant would be the only zero reading that would be accurate.Therefore, we can impute 0's rather than omitting them in our analyses**
+
+**To impute the 0's, we first change all of the 0's to NA's with the exeption of the pregnant predictor. Then using the 'bagImpute' method from the caret package, we will impute the missing values. This method is the bagging (bootstrap aggregating) of regression trees. It provides the recovery of missing values for several variables at once, based on regression dependencies. This method  takes each predictor in the data, created a bagged tree using all of the other predictors in the train.dummy set. The bagged model is used to predict the missing values. The computational cost of this method is afforded by the size of the dataset. Then columns from the train.dummy set that were predicted we used to replace columns that had missing values.**
+
+
+## Replace Zeros
+```{r replacezeros}
+# replace zeros with NA
+x[x == 0] <- NA
+
+#Return Pregnant NA back to 0(zerO)
+x$pregnant[is.na(x$pregnant)] <- 0
+
+# Transform all feature to dummy variables.
+dummy.vars <- dummyVars(~ ., data = x)
+train.dummy <- predict(dummy.vars, x)
+
+#impute
+pre.process <- preProcess(train.dummy, method = "bagImpute")
+imputed.data <- predict(pre.process, train.dummy)
+
+#Replace zeros with imputed dummy variables
+x$glucose <- imputed.data[,2]
+x$pressure <- imputed.data[,3]
+x$triceps <- imputed.data[,4]
+x$insulin <- imputed.data[,5]
+x$mass <- imputed.data[,6]
+
+#Check to make sure that it worked
+zerobycolumn <-colSums(x==0)
+summary(x)
+
+#Density Plots
+transparentTheme(trans = .9)
+featurePlot(x = x, 
+            y = y,
+            plot = "density", 
+            scales = list(x =list(relation="free"), 
+                          y =list(relation="free")), 
+            adjust = 2.5, 
+            pch = "|", 
+            layout = c(4, 2), 
+            auto.key = list(columns = 8))
+
+#Box Plots
+featurePlot(x = x, 
+            y = y, 
+            plot = "box", 
+            scales = list(y = list(relation="free"),
+                          x = list(rot = 90)),  
+            layout = c(4,2 ), 
+            auto.key = list(columns = 4))
+```
+
+
+
+
+
+## Split the data
+```{r split}
+set.seed(2323)
+indexes <- createDataPartition(y,times = 1,p = 0.7,list = FALSE)
+
+trainx <- x[indexes,]
+testx <- x[-indexes,]
+trainy <- y[indexes]
+testy <- y[-indexes]
+
+
+# Examine the proportions of the response class label across the datasets.
+prop.table(table(dat$diabetes))
+prop.table(table(trainy))
+prop.table(table(testy))
+```
+
+
+# TRAIN MODELS
+
+## Logistic Regression Training Models
+Here we are falling down the rabbit hole to see if there are any significant differences in four different preprocessing methods with the Logistic Regression Training Models. We will attempt to preprocess with simple center and scaling for all four. Additionally, on each of the other three models we will try the Box Cox transformation, Yeo Johnson Transformation, and Principal Component Analysis(PCA).
+```{r lm}
+#Logistic Regression: Training Model
+#Control Object 
+ctrl <- trainControl(method = "cv", number = 10, 
+                     classProbs = T, summaryFunction =
+                     twoClassSummary,savePredictions = T)
+#Center and Scale
+set.seed(2345)
+lr_train_data <- train(x=trainx,y=trainy,
+                              method = "glm",
+                              metric = "ROC",
+                              preProcess =      
+                              c("center","scale"),
+                              tuneLength = 10,
+                              trControl = ctrl )
+
+lr_train_data
+
+#Yeo Johnson
+set.seed(2345)
+lr_train_dataYJ <- train(x=trainx,y=trainy,
+                              method = "glm",
+                              metric = "ROC",
+                              preProcess =      
+                              c("center","scale","YeoJohnson"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+lr_train_dataYJ
+
+#Box Cox
+set.seed(2345)
+lr_train_dataBC <- train(x=trainx,y=trainy,
+                              method = "glm",
+                              metric = "ROC",
+                              preProcess =      
+                              c("center","scale","BoxCox"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+lr_train_dataBC
+
+#PCA
+set.seed(2345)
+lr_train_dataPCA <- train(x=trainx,y=trainy,
+                              method = "glm",
+                              metric = "ROC",
+                              preProcess =      
+                              c("center","scale","pca"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+lr_train_dataPCA
+
+#Comparision of different preprocesses on the logistic regression training model
+#(Yeo Johnson, Box Cox, PCA, and simple center and scaling).
+lrTrainComp <- list(LogisticRegression = lr_train_data,
+                    LogisticRegressionYJ = lr_train_dataYJ,
+                    LogisticRegressionBC = lr_train_dataBC,
+                    LogisticRegressionPCA = lr_train_dataPCA)
+
+resampleLogisticRegression <- resamples(lrTrainComp)
+
+dotplot(resampleLogisticRegression, metric="ROC",
+        main="Different Preprocesses for Logistic Regression Training Models Comparision")
+
+#MLeval:evalm() is for machine learning model evaluation. 
+#The function can accept the Caret 'train' function results 
+#to evaluate machine learning predictions or a data frame 
+#of probabilities and ground truth labels can be passed in 
+#to evaluate
+
+names<- c("LR","LR-YeoJohnson","LR-BoxCox","LR-PCA")
+res <- evalm(lrTrainComp, gnames = names,title="Performance Metrics: \nVarious Preprocessing Methods \nfor Logistic Regression Models")
+
+## get ROC
+#res$roc
+
+## get calibration curve
+#res$cc
+
+## get precision recall gain curve
+#res$prg
+
+```
+
+## K-Nearest Neighbors (KNN)
+```{r knn}
+#Tune Grid
+knnTG = expand.grid(.k = c(3:10))
+
+#Center and Scale
+set.seed(2345)
+knn_train_data <- train(x=trainx,y=trainy,
+                              method = "knn",
+                              metric = "ROC",
+                              tuneGrid = knnTG,
+                              preProcess =      
+                              c("center","scale"),
+                              tuneLength = 10,
+                              trControl = ctrl )
+
+knn_train_data
+
+#Yeo Johnson
+set.seed(2345)
+knn_train_dataYJ <- train(x=trainx,y=trainy,
+                              method = "knn",
+                              metric = "ROC",
+                              tuneGrid = knnTG,
+                              preProcess =      
+                              c("center","scale","YeoJohnson"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+knn_train_dataYJ
+
+#Box Cox
+set.seed(2345)
+knn_train_dataBC <- train(x=trainx,y=trainy,
+                              method = "knn",
+                              metric = "ROC",
+                              tuneGrid = knnTG,
+                              preProcess =      
+                              c("center","scale","BoxCox"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+knn_train_dataBC
+
+#PCA
+set.seed(2345)
+knn_train_dataPCA <- train(x=trainx,y=trainy,
+                              method = "knn",
+                              metric = "ROC",
+                              tuneGrid = knnTG,
+                              preProcess =      
+                              c("center","scale","pca"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+knn_train_dataPCA
+
+#Comparision of different preprocesses on the knn training model
+#(Yeo Johnson, Box Cox, PCA, and simple center and scaling).
+knnTrainComp <- list(knn = knn_train_data,
+                    knnYJ = knn_train_dataYJ,
+                    knnBC = knn_train_dataBC,
+                    knnPCA = knn_train_dataPCA)
+
+resampleknn <- resamples(knnTrainComp)
+
+dotplot(resampleknn, metric="ROC",
+        main="Various Preprocesses for KNN \nTraining Models Comparision")
+
+#MLeval:evalm() is for machine learning model evaluation. 
+#The function can accept the Caret 'train' function results 
+#to evaluate machine learning predictions or a data frame 
+#of probabilities and ground truth labels can be passed in 
+#to evaluate
+
+names2<- c("KNN","KNN-YeoJohnson","KNN-BoxCox","KNN-PCA")
+res <- evalm(knnTrainComp, gnames = names2,title="Performance Metrics: \nVarious Preprocessing Methods \nfor KNN Models")
+
+```
+
+
+## Linear Support Vector Machine (SVM)
+```{r Lsvm}
+#Tune Grid
+#We tune our LSVM by having the expand.grid() take on 
+#different cost values and then choose the C with the 
+#highest ROC. Then we use train() to run through the 
+#training and test sets to build the LSVM, and use method = "svmLinear" 
+#for the linear kernel.
+
+svmTG = expand.grid(C=c(seq(.5,5,by=.5)))
+
+#Center and Scale
+set.seed(2345)
+svm_train_data <- train(x=trainx,y=trainy,
+                              method = "svmLinear",
+                              metric = "ROC",
+                              tuneGrid = svmTG,
+                              preProcess =      
+                              c("center","scale"),
+                              tuneLength = 10,
+                              trControl = ctrl )
+
+svm_train_data
+
+#Yeo Johnson
+set.seed(2345)
+svm_train_dataYJ <- train(x=trainx,y=trainy,
+                              method = "svmLinear",
+                              metric = "ROC",
+                              tuneGrid = svmTG,
+                              preProcess =      
+                              c("center","scale","YeoJohnson"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+svm_train_dataYJ
+
+#Box Cox
+set.seed(2345)
+svm_train_dataBC <- train(x=trainx,y=trainy,
+                              method = "svmLinear",
+                              metric = "ROC",
+                              tuneGrid = svmTG,
+                              preProcess =      
+                              c("center","scale","BoxCox"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+svm_train_dataBC
+
+#PCA
+set.seed(2345)
+svm_train_dataPCA <- train(x=trainx,y=trainy,
+                              method = "svmLinear",
+                              metric = "ROC",
+                              tuneGrid = svmTG,
+                              preProcess =      
+                              c("center","scale","pca"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+svm_train_dataPCA
+
+#Comparision of different preprocesses on the knn training model
+#(Yeo Johnson, Box Cox, PCA, and simple center and scaling).
+svmTrainComp <- list(Lsvm = svm_train_data,
+                    LsvmYJ = svm_train_dataYJ,
+                    LsvmBC = svm_train_dataBC,
+                    LsvmPCA = svm_train_dataPCA)
+
+resamplesvm <- resamples(svmTrainComp)
+
+dotplot(resamplesvm, metric="ROC",
+        main="Various Preprocesses for SVM \nTraining Models Comparision")
+
+#MLeval:evalm() is for machine learning model evaluation. 
+#The function can accept the Caret 'train' function results 
+#to evaluate machine learning predictions or a data frame 
+#of probabilities and ground truth labels can be passed in 
+#to evaluate
+
+names3<- c("LSVM","LSVM-YeoJohnson","LSVM-BoxCox","LSVM-PCA")
+res <- evalm(svmTrainComp, gnames = names3,title="Performance Metrics: \nVarious Preprocessing Methods \nfor SVM Models")
+
+```
+
+## Radial Support Vector Machine (SVM)
+```{r Rsvm}
+#Tune Grid
+#We tune our LSVM by having the expand.grid() take on 
+#different cost values and then choose the C with the 
+#highest ROC. Then we use train() to run through the 
+#training and test sets to build the LSVM, and use method = "svmLinear" 
+#for the linear kernel.
+
+RsvmTG = expand.grid(sigma = c(2,3,4,5),
+                    C = c(.2,.4,.6,.8))
+
+#Center and Scale
+set.seed(2345)
+Rsvm_train_data <- train(x=trainx,y=trainy,
+                              method = "svmRadial",
+                              metric = "ROC",
+                              tuneGrid = RsvmTG,
+                              preProcess =      
+                              c("center","scale"),
+                              tuneLength = 10,
+                              trControl = ctrl )
+
+Rsvm_train_data
+
+#Yeo Johnson
+set.seed(2345)
+Rsvm_train_dataYJ <- train(x=trainx,y=trainy,
+                              method = "svmRadial",
+                              metric = "ROC",
+                              tuneGrid = RsvmTG,
+                              preProcess =      
+                              c("center","scale","YeoJohnson"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+Rsvm_train_dataYJ
+
+#Box Cox
+set.seed(2345)
+Rsvm_train_dataBC <- train(x=trainx,y=trainy,
+                              method = "svmRadial",
+                              metric = "ROC",
+                              tuneGrid = RsvmTG,
+                              preProcess =      
+                              c("center","scale","BoxCox"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+Rsvm_train_dataBC
+
+#PCA
+set.seed(2345)
+Rsvm_train_dataPCA <- train(x=trainx,y=trainy,
+                              method = "svmRadial",
+                              metric = "ROC",
+                              tuneGrid = RsvmTG,
+                              preProcess =      
+                              c("center","scale","pca"),
+                              tuneLength = 10,
+                              trControl = ctrl)
+
+Rsvm_train_dataPCA
+
+#Comparision of different preprocesses on the Radial SVM training model
+#(Yeo Johnson, Box Cox, PCA, and simple center and scaling).
+RsvmTrainComp <- list(Rsvm = Rsvm_train_data,
+                    RsvmYJ = Rsvm_train_dataYJ,
+                    RsvmBC = Rsvm_train_dataBC,
+                    RsvmPCA = Rsvm_train_dataPCA)
+
+resampleRsvm <- resamples(RsvmTrainComp)
+
+dotplot(resampleRsvm, metric="ROC",
+        main="Various Preprocesses for RSVM \nTraining Models Comparision")
+
+#MLeval:evalm() is for machine learning model evaluation. 
+#The function can accept the Caret 'train' function results 
+#to evaluate machine learning predictions or a data frame 
+#of probabilities and ground truth labels can be passed in 
+#to evaluate
+
+names4<- c("RSVM","RSVM-YeoJohnson","RSVM-BoxCox","RSVM-PCA")
+res <- evalm(RsvmTrainComp, gnames = names4,title="Performance Metrics: \nVarious Preprocessing Methods \nfor RSVM Models")
+
+```
+
+# TEST MODELS
+
+## Logistic Regression Predictions
+```{r lrtest}
+# #Centered and Scaled Logistic Regression
+# lrpredict = predict(lr_train_data,testx)
+# #Confusion Matrix
+# lrcm = confusionMatrix( data=lrpredict, reference=testy,positive = "pos")
+# lrcm
+# #Prediction Probabilities
+# lrprob <- predict(lr_train_data,testx,type="prob")
+# #ROC
+# lrROC <- roc(testy,lrprob$pos)
+# lrROC
+# 
+# plot(lrROC, type = "s", col = rgb(.2, .2, .2, .2), add = TRUE, legacy.axes = TRUE)
+# plot(lrROC, col = 1, lty = 2, main = "ROC")
+# plot(roc2, col = 4, lty = 3, add = TRUE)
+# # AUC - Area under the curve
+# colAUC(lrprob$pos, testy, plotROC = T)
+# 
+# 
+# ## Get the confusion matrices for the hold-out set
+# lrCM <- confusionMatrix(lrFit, norm = "none")
+# lrCM
+# 
+# ## Get the area under the ROC curve for the hold-out set
+# lrRoc <- roc(response = lr_train_data$pred$obs,
+#              predictor = lr_train_data$pred$successful,
+#              levels = rev(levels(lr_train_data$pred$obs)))
+# plot(lrRoc, legacy.axes = TRUE)
+# lrImp <- varImp(lr_train_data, scale = FALSE)
+# lrImp
+# 
+# plot(lrRoc, type = "s", col = rgb(.2, .2, .2, .2), legacy.axes = TRUE)
+# plot(ldaRoc, add = TRUE, type = "s", legacy.axes = TRUE)
+# 
+# 
+# #Yeo Johnson
+# lrpredictYJ = predict( lr_train_dataYJ,testx)
+# lrcmYJ = confusionMatrix( data=lrpredictYJ, reference=testy,positive = "pos" )
+# lrcmYJ
+# 
+# #Box Cox
+# lrpredictBC = predict( lr_train_dataBC,testx)
+# lrcmBC = confusionMatrix( data=lrpredictBC, reference=testy,positive = "pos" )
+# lrcmBC
+# 
+# #PCA
+# lrpredictPCA = predict( lr_train_dataPCA,testx)
+# lrcmPCA = confusionMatrix( data=lrpredictPCA, reference=testy,positive = "pos" )
+# lrcmPCA
+# 
+# 
+# #Comparision of different preprocesses on the logistic regression test model(Yeo Johnson, Box Cox, PCA, and simple center and scaling).
+# lrTestComp <- list(LogisticRegression = lrpredict, LogisticRegressionYJ = lrpredictYJ, LogisticRegressionBC = lrpredictBC, LogisticRegressionPCA = lrpredictPCA)
+# resampleLogisticRegressionTest <- resamples(lrTestComp)
+# 
+# dotplot(resampleLogisticRegressionTest, metric="ROC",main="Different Preprocesses for Logistic Regression Test Models Comparision")
+# 
+# 
+# result_rf <- c(cm_rf$byClass['Sensitivity'], cm_rf$byClass['Specificity'], cm_rf$byClass['Precision'], 
+#                cm_rf$byClass['Recall'], cm_rf$byClass['F1'], roc_rf$auc)
+# 
+# result_xgb <- c(cm_xgb$byClass['Sensitivity'], cm_xgb$byClass['Specificity'], cm_xgb$byClass['Precision'], 
+#                cm_xgb$byClass['Recall'], cm_xgb$byClass['F1'], roc_xgb$auc)
+# 
+# result_knn <- c(cm_knn$byClass['Sensitivity'], cm_knn$byClass['Specificity'], cm_knn$byClass['Precision'], 
+#                cm_knn$byClass['Recall'], cm_knn$byClass['F1'], roc_knn$auc)
+# 
+# result_glm <- c(cm_glm$byClass['Sensitivity'], cm_glm$byClass['Specificity'], cm_glm$byClass['Precision'], 
+#                cm_glm$byClass['Recall'], cm_glm$byClass['F1'], roc_glm$auc)
+# 
+# result_rpart <- c(cm_rpart$byClass['Sensitivity'], cm_rpart$byClass['Specificity'], cm_rpart$byClass['Precision'], 
+#                cm_rpart$byClass['Recall'], cm_rpart$byClass['F1'], roc_rpart$auc)
+# 
+# 
+# all_results <- data.frame(rbind(result_rf, result_xgb, result_knn, result_glm, result_rpart))
+# names(all_results) <- c("Sensitivity", "Specificity", "Precision", "Recall", "F1", "AUC")
+# all_results
+```
