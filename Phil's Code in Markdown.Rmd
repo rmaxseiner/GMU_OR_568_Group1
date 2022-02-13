@@ -1,16 +1,12 @@
 ---
-title: "Phil's Code in Markdown"
-author: "Ronald Maxseiner"
+title: "Final Project"
+author: "Group 1"
 date: "2/12/2022"
 output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-```
-
-
-```{r Phil}
 #Group 1: Diabetes Dataset
 #Members: Phil, Ron, Kelly, Jane
 
@@ -36,12 +32,14 @@ library(randomForest)
 registerDoParallel(cores=7)
 
 set.seed(100)
+```
 
 
+```{r DataPreparation}
 #Pima Indians Diabetes Dataset Found Inside Caret Function
 data(PimaIndiansDiabetes)# There are two of them, versions
 df <- PimaIndiansDiabetes
-df
+# df
 str(df)
 
 #Summary Statistics
@@ -80,25 +78,35 @@ list( Column = colSums(df==0),
 #Outcome Variable
 #1.diabetes
 
-#Replace All Zeros 
+# drop triceps as this does not seem to improve the predictions
+df <- df[,-4]
+#df
+
+# replace zeros with NA
 df[df == 0] <- NA
 
 #Return Pregnant NA back to 0(zerO)
 df$pregnant[is.na(df$pregnant)] <- 0
-#df
-
-#Replace NA Values with Mean from respective columns: glucose, pressure, mass, insulin & triceps
-df$glucose[is.na(df$glucose)]<-mean(df$glucose,na.rm=TRUE) #glucose
-df$pressure[is.na(df$pressure)]<-mean(df$pressure,na.rm=TRUE) #pressure
-df$mass[is.na(df$mass)]<-mean(df$mass,na.rm=TRUE) #mass
-df$insulin[is.na(df$insulin)]<-mean(df$insulin,na.rm=TRUE) #insulin
-df$triceps[is.na(df$triceps)]<-mean(df$triceps,na.rm=TRUE) #triceps
-df <- df[,-4]
-#df
 
 
-#Updated Summary Statistics After replacing NA Values with Mean from respective columns: glucose, pressure, & mass
+# Transform all feature to dummy variables.
+dummy.vars <- dummyVars(~ ., data = df)
+train.dummy <- predict(dummy.vars, df)
+
+#impute
+pre.process <- preProcess(train.dummy, method = "bagImpute")
+imputed.data <- predict(pre.process, train.dummy)
+
+#Replace zeros with imputed dummy variables
+df$glucose <- imputed.data[,2]
+df$pressure <- imputed.data[,3]
+df$insulin <- imputed.data[,4]
+df$mass <- imputed.data[,5]
+
+#Check to make sure that it worked
+zerobycolumn <-colSums(df==0)
 summary(df)
+
 
 #Histograms of Diabetes: Predictor Variables
 n <-df[,1:(ncol(df)-1)] #Predictors are variables 1-8
@@ -134,8 +142,10 @@ test_data <- df[-split,]
 
 #Summary Statistics
 summary(train_data)
+```
 
 
+```{r Models}
 ##################Training Models########################## 
 #Logistic Regression: Training Model
 #No Tuning Parameters for Simple Logistic Regression
@@ -284,14 +294,19 @@ ldaFit
 
 
 #Compare ROC Value by Training Model
-allmodels <- list(Logistic_Regression = lr_train_data, Random_Forest = rf_train_data, KNN = knn_train_data, CART = cart_train_data, NNET = nnet_train_data, SVM = svmFit, Boost = gbmFit, ENet = glmnFit, NSC = nscFit, LDA = ldaFit)
+allmodels <- list(Logistic_Regression = lr_train_data, Random_Forest = rf_train_data, KNN = knn_train_data, CART = cart_train_data, NNET = nnet_train_data, SVM = svmFit)
+allmodels2 <- list(NSC = nscFit, LDA = ldaFit, Boost = gbmFit, ENet = glmnFit)
 trainresults <- resamples(allmodels)
+trainresults2 <- resamples(allmodels2)
 
 #Box Plot: Training Models' ROC Values
 #Logistic Regression Performed Best on Training Data
 bwplot(trainresults, metric="ROC")
+bwplot(trainresults2, metric= "ROC")
+```
 
 
+```{r ConfusionMatrix}
 ###########################Test Data############################
 #Logistic Regression: Testing Data
 lrpredict <- predict(lr_train_data, test_data)
@@ -352,7 +367,10 @@ ldapredict <- predict(ldaFit, test_data)
 #Confusion Matrix Accuracy
 ldaconfusion <- confusionMatrix(ldapredict, test_data$diabetes, positive="pos")
 ldaconfusion
+```
 
+
+```{r FinalResult}
 #Comparing Test Results
 lrfinal<- c(lrconfusion$byClass['Sensitivity'], lrconfusion$byClass['Specificity'], lrconfusion$byClass['Precision'], 
             lrconfusion$byClass['Recall'], lrconfusion$byClass['F1'])
