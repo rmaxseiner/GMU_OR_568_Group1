@@ -14,6 +14,8 @@ library(pROC) #ROC
 library(caTools) #AUC
 library(rpart.plot) #CART Decision Tree
 library(e1071) #imports graphics, grDevices, class, stats, methods, utils
+library(doParallel)
+library(AppliedPredictiveModeling)
 
 
 #Pima Indians Diabetes Dataset Found Inside Caret Function
@@ -162,9 +164,57 @@ cart_train_data <- caret::train(diabetes ~., data = train_data,
 
 cart_train_data
 
+#Neural Net
+registerDoParallel(cores=7)
+nnetGrid <- expand.grid(.decay = c(0, 0.01, 0.1), 
+                        .size = c(1:10), 
+                        .bag = FALSE
+)
+nnet_train_data <- caret::train(diabetes ~., data = train_data,
+                                method = "avNNet",
+                                tuneGrid = nnetGrid,
+                                metric = "ROC",
+                                trControl = trainControl(method = "cv", number = 10,
+                                                         classProbs = TRUE, summaryFunction = twoClassSummary),
+                                preProcess = c("center","scale","pca"), 
+                                linout = TRUE, 
+                                trace = FALSE,
+                                MaxNWts = 10 * (ncol(train_data) + 1) + 10 + 1,
+                                maxit = 500)
+
+nnet_train_data
+plot(nnet_train_data)
+
+
+################# Support Vector Machines #####################
+
+svmFit <- train(diabetes ~., data = train_data, 
+                method = "svmRadial",
+                metric = "ROC", 
+                tuneLength = 14, 
+                trControl = trainControl(method = "cv", number = 10,
+                                         classProbs = TRUE, summaryFunction = twoClassSummary))
+svmFit
+plot(svmFit)
+
+################# Support Vector Machines #####################
+
+gbmGrid <- expand.grid(.interaction.depth = seq(1, 7, by = 2),
+                       .n.trees = seq(100, 1000, by = 50), 
+                       .shrinkage = c(0.01, 0.1),
+                       .n.minobsinnode = 10)
+
+gbmFit <- train(diabetes ~., data = train_data,
+                method = "gbm",
+                tuneGrid = gbmGrid,
+                verbose = FALSE, 
+                trControl = trainControl(method = "cv", number = 10,
+                                         classProbs = TRUE, summaryFunction = twoClassSummary))
+
+gbmFit
 
 #Compare ROC Value by Training Model
-allmodels <- list(Logistic_Regression = lr_train_data, Random_Forest = rf_train_data, KNN = knn_train_data)
+allmodels <- list(Logistic_Regression = lr_train_data, Random_Forest = rf_train_data, KNN = knn_train_data, CART = cart_train_data, NNET = nnet_train_data, SVM = svmFit, Boost = gbmFit)
 trainresults <- resamples(allmodels)
 
 #Box Plot: Training Models' ROC Values
@@ -197,6 +247,23 @@ cartpredict <- predict(cart_train_data, test_data)
 cartconfusion <- confusionMatrix(cartpredict, test_data$diabetes, positive="pos")
 cartconfusion
 
+#Neural Net: Testing Data
+nnetpredict <- predict(nnet_train_data, test_data)
+#Confusion Matrix Accuracy
+nnetconfusion <- confusionMatrix(nnetpredict, test_data$diabetes, positive="pos")
+nnetconfusion
+
+#Support Vector Machines
+svmpredict <- predict(svmFit, test_data)
+#Confusion Matrix Accuracy
+svmconfusion <- confusionMatrix(svmpredict, test_data$diabetes, positive="pos")
+svmconfusion
+
+#Boost 
+gbmpredict <- predict(gbmFit, test_data)
+#Confusion Matrix Accuracy
+gbmconfusion <- confusionMatrix(gbmpredict, test_data$diabetes, positive="pos")
+gbmconfusion
 
 #Comparing Test Results
 lrfinal<- c(lrconfusion$byClass['Sensitivity'], lrconfusion$byClass['Specificity'], lrconfusion$byClass['Precision'], 
@@ -210,11 +277,16 @@ knnfinal <- c(knnconfusion$byClass['Sensitivity'], knnconfusion$byClass['Specifi
 cartfinal <- c(cartconfusion$byClass['Sensitivity'], cartconfusion$byClass['Specificity'], cartconfusion$byClass['Precision'], 
                cartconfusion$byClass['Recall'], cartconfusion$byClass['F1'])
 
+nnetfinal <- c(nnetconfusion$byClass['Sensitivity'], nnetconfusion$byClass['Specificity'], nnetconfusion$byClass['Precision'], 
+               nnetconfusion$byClass['Recall'], nnetconfusion$byClass['F1'])
 
-allmodelsfinal <- data.frame(rbind(lrfinal, rffinal, knnfinal, cartfinal))
+svmfinal <- c(svmconfusion$byClass['Sensitivity'], svmconfusion$byClass['Specificity'], svmconfusion$byClass['Precision'], 
+              svmconfusion$byClass['Recall'], svmconfusion$byClass['F1'])
+
+gbmfinal <- c(gbmconfusion$byClass['Sensitivity'], gbmconfusion$byClass['Specificity'], gbmconfusion$byClass['Precision'], 
+              gbmconfusion$byClass['Recall'], gbmconfusion$byClass['F1'])
+
+allmodelsfinal <- data.frame(rbind(lrfinal, rffinal, knnfinal, cartfinal, nnetfinal, svmfinal, gbmfinal))
 names(allmodelsfinal) <- c("Sensitivity", "Specificity", "Precision", "Recall", "F1")
 allmodelsfinal 
 
-
-
- 
