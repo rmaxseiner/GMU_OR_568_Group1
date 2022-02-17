@@ -35,7 +35,8 @@ set.seed(100)
 ```
 
 
-```{r DataPreparation}
+# Data Description
+```{r DataDescription}
 #Pima Indians Diabetes Dataset Found Inside Caret Function
 data(PimaIndiansDiabetes)# There are two of them, versions
 df <- PimaIndiansDiabetes
@@ -44,7 +45,13 @@ str(df)
 
 #Summary Statistics
 summary(df)
+```
 
+## Data Preparation
+* No near zero variance predictors.  No action necessary.
+* No NA values. No action necessary.
+* There are a significant number of 0 Values
+```{r NearZeroVariance}
 #Confirmation of No Near Zero Variance for Predictor Variables
 predictors <- PimaIndiansDiabetes[ , -(9)]
 print(nearZeroVar(predictors))
@@ -53,34 +60,26 @@ print(nearZeroVar(predictors))
 #Confirmed No Missing Values
 sapply(df, function(x) sum(is.na(x)))
 
-#List Zero Markers: 6 out of 9 Variables have zero markers for Predictor Variables
-list( Column = colSums(df==0), 
-      Row = sum(rowSums(df==0)))
 
-#Logic Behind 6 Zero Markers
-#pregnant- not all woman have a baby, likely 0 is a true value, will keep predictor variable
-#glucose- only 5 values are missing, will keep predictor variable, will use numerical mean
-#pressure- only 35 values are missing, will keep predictor variable, will use numerical mean  
-#triceps- approximately 30% of the data contains 0 values, will keep predictor variable, will use numerical mean
-#insulin- almost 50% of the data has 0 values, will keep predictor variable, will use numerical mean
-#mass- only 11 values are missing, will keep predictor variable
 
-#Predictor Variables After Review of Summary Statistics and Zero Markers
-#1.pregnant
-#2.glucose
-#3.pressure
-#4.mass
-#5.pedigree
-#6.age
-#7.triceps
-#8.insulin
 
-#Outcome Variable
-#1.diabetes
+```
 
+
+## Process Zero values
+Logic Behind 6 Zero Markers
+* pregnant - not all woman have a baby, likely 0 is a true value, will keep predictor variable
+* glucose - only 5 values are missing, will keep predictor variable, will fill zeros with bag Impute. 
+* pressure - only 35 values are missing, will keep predictor variable, will fill zeros with bag Impute.  
+* triceps - approximately 30% of the data contains 0 values.  Initial predictions show that this predictor does not help the models.  It will be dropped. 
+* insulin - almost 50% of the data has 0 values, will keep predictor variable, will fill zeros with bag Impute.
+* mass - only 11 values are missing, will fill zeros with bag Impute.
+
+
+```{r ZeroPredictors}
 # drop triceps as this does not seem to improve the predictions
 df <- df[,-4]
-#df
+
 
 # replace zeros with NA
 df[df == 0] <- NA
@@ -106,8 +105,31 @@ df$mass <- imputed.data[,5]
 #Check to make sure that it worked
 zerobycolumn <-colSums(df==0)
 summary(df)
+```
+## Skewness
+Generally values between -1 and 1 are acceptable. Insulin, Age and Pedigree have skewness values beyond these thresholds.  Using the log of these functions removes the skewness. 
+*Note doesn't boxcox correct for this?
 
+```{r Skewness}
 
+#skewness 
+skewness(df$pregnant) #0.898
+skewness(df$glucose) #0.529
+skewness(df$pressure) #0.145
+skewness(df$insulin) #2.026
+skewness(df$mass) #0.595
+skewness(df$pedigree) #1.912
+skewness(df$age) #1.125
+
+skewness(log(df$age))
+skewness(log(df$pedigree))
+skewness(log(df$insulin))
+
+```
+
+## Graphical Review of data
+
+```{r Histogram}
 #Histograms of Diabetes: Predictor Variables
 n <-df[,1:(ncol(df)-1)] #Predictors are variables 1-8
 par(mfrow = c(3,3)) #Histograms will be 3x3
@@ -117,8 +139,12 @@ for (i in 1:ncol(n))
 
 #Correlation Plot of Diabetes: Predictor Variables
 x <- cor(df[1:ncol(df)-1])
-corrplot(x, method="number")  
+pairs(x)
+corrplot(x, method="number")
+```
 
+
+```{r BoxPlots}
 #Box Plots of Diabetes: Predictor Variables
 boxplot(df$pregnant, main = "Pregnant Boxplot", col = "red")
 boxplot(df$glucose, main = "Glucose Boxplot", col = "red")
@@ -128,8 +154,12 @@ boxplot(df$insulin, main = "Insulin Boxplot", col = "red")
 boxplot(df$mass, main = "Mass Boxplot", col = "red")
 boxplot(df$pedigree, main = "Pedigree Boxplot", col = "red")
 boxplot(df$age, main = "Age Boxplot", col = "red")
- 
+```
 
+## Data Splitting
+Data will be split 80%/20% train/testing.  
+
+```{r SplitData}
 #Split Training and Test Data, 80/20
 set.seed(100)
 split <- caret::createDataPartition(y = df$diabetes, times = 1, p = 0.8, list = FALSE)
@@ -144,6 +174,9 @@ test_data <- df[-split,]
 summary(train_data)
 ```
 
+## Model Training
+The following models will be trained on the training data.  
+Logistic Regression 
 
 ```{r Models}
 ##################Training Models########################## 
@@ -155,8 +188,9 @@ lr_train_data <- caret::train(diabetes ~., data = train_data,
                           tuneLength = 10,
                           trControl = trainControl(method = "cv", number = 10,
                                                    classProbs = T, summaryFunction = twoClassSummary),
-                          preProcess = c("center","scale"))
+                          preProcess = c("center","scale", "BoxCox"))
 
+lr_train_data$preProcess
 lr_train_data
 summary(lr_train_data)
 
@@ -177,7 +211,7 @@ FinalTree = rf_train_data$finalModel$importance.mode
 knn_train_data <- caret::train(diabetes ~., data = train_data,
                           method = "knn",
                           metric = "ROC",
-                          tuneGrid = expand.grid(.k = c(3:10)),
+                          tuneGrid = expand.grid(.k = c(3:30)),
                           trControl = trainControl(method = "cv", number = 10,
                                                    classProbs = T, summaryFunction = twoClassSummary),
                           preProcess = c("center","scale"))
@@ -194,7 +228,7 @@ cart_train_data <- caret::train(diabetes ~., data = train_data,
                             tuneLength = 20,
                             trControl = trainControl(method = "cv", number = 10,
                                                      classProbs = TRUE, summaryFunction = twoClassSummary),
-                            preProcess = c("center","scale", "pca"))
+                            preProcess = c("center","scale"))
 
 cart_train_data
 
@@ -232,7 +266,7 @@ svmFit <- train(diabetes ~., data = train_data,
                 method = "svmRadial",
                 metric = "ROC", 
                 tuneLength = 14,
-                preProcess = c("center","scale"), 
+                preProcess = c("center","scale", "BoxCox"), 
                 trControl = trainControl(method = "cv", number = 10,
                                          classProbs = TRUE, summaryFunction = twoClassSummary))
 svmFit
@@ -262,7 +296,7 @@ glmnGrid <- expand.grid(.alpha = c(0, .1, .2, .4, .6, .8, 1),
 glmnFit <- train(diabetes ~., data = train_data,
                 method = "glmnet",
                 tuneGrid = glmnGrid,
-                preProcess = c("center","scale"),
+                preProcess = c("center","scale", "BoxCox"),
                 metric = "ROC",
                 trControl = trainControl(method = "cv", number = 10,
                                          classProbs = TRUE, summaryFunction = twoClassSummary))
@@ -275,7 +309,7 @@ nscGrid <- data.frame(.threshold = 0:25)
 nscFit <- train(diabetes ~., data = train_data,
                 method = "pam",
                 tuneGrid = nscGrid,
-                preProcess = c("center","scale"),
+                preProcess = c("center","scale", "BoxCox"),
                 metric = "ROC",
                 trControl = trainControl(method = "cv", number = 10,
                                          classProbs = TRUE, summaryFunction = twoClassSummary))
@@ -285,7 +319,7 @@ nscFit
 ldaFit <- train(diabetes ~., data = train_data,
                 method = "lda",
                 metric = "ROC",
-                preProcess = c("center","scale"),
+                preProcess = c("center","scale", "BoxCox"),
                 trControl = trainControl(method = "cv", number = 10,
                                          classProbs = TRUE, summaryFunction = twoClassSummary))
 
