@@ -457,5 +457,9 @@ allmodelsfinal <- data.frame(rbind(lrfinal, rffinal, knnfinal, cartfinal, nnetfi
 names(allmodelsfinal) <- c("Sensitivity", "Specificity", "Precision", "Recall", "F1")
 allmodelsfinal 
 
+#To find the Most Important Predictors within the Diabetes Dataset
+importance <- randomForest(diabetes ~., data = train_data, importance=TRUE) # fit the random forest with default parameter
+
+varImp(importance) # get variable importance, based on mean decrease in accuracy
 
 ```
