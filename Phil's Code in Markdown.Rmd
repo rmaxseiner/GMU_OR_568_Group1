@@ -459,6 +459,7 @@ names(allmodelsfinal) <- c("Sensitivity", "Specificity", "Precision", "Recall", 
 allmodelsfinal 
 
 #To find the Most Important Predictors within the Diabetes Dataset
+set.seed(1)
 importance <- randomForest(diabetes ~., data = train_data, importance=TRUE) # fit the random forest with default parameter
 
 varImp(importance) # get variable importance, based on mean decrease in accuracy
