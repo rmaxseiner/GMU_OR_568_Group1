@@ -28,6 +28,7 @@ library(AppliedPredictiveModeling)
 library(rpart)
 library(partykit)
 library(randomForest)
+library(varImp)
 
 registerDoParallel(cores=7)
 
