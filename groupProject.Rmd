@@ -1,0 +1,405 @@
+---
+title: "Final Project"
+author: "Group 1"
+date: "2/25/2022"
+output: pdf_document
+---
+
+```{r setup, set.seed(1),include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#Group 1: Diabetes Dataset
+#Members: Phil, Ron, Kelly, Jane
+#Libraries used 
+library(caret) #ML Model buidling package
+library(tidyverse) #ggplot and dplyr
+library(MASS) #Modern Applied Statistics with S
+library(mlbench) #data sets from the UCI repository.
+library(summarytools)
+library(corrplot) #Correlation plot
+library(gridExtra) #Multiple plot in single grip space
+library(timeDate) 
+library(pROC) #ROC
+library(caTools) #AUC
+library(rpart.plot) #CART Decision Tree
+library(e1071) #imports graphics, grDevices, class, stats, methods, utils
+library(doParallel)
+library(AppliedPredictiveModeling)
+library(rpart)
+library(partykit)
+library(randomForest)
+library(varImp)
+registerDoParallel(cores=7)
+set.seed(1)
+```
+
+
+# Data Description
+```{r DataDescription,set.seed(1)}
+#Pima Indians Diabetes Dataset Found Inside Caret Function
+data(PimaIndiansDiabetes)# There are two of them, versions
+df <- PimaIndiansDiabetes
+# df
+str(df)
+#Summary Statistics
+summary(df)
+```
+
+## Data Preparation
+* No near zero variance predictors.  No action necessary.
+* No NA values. No action necessary.
+* There are a significant number of 0 Values
+```{r NearZeroVariance,set.seed(1)}
+#Confirmation of No Near Zero Variance for Predictor Variables
+predictors <- PimaIndiansDiabetes[ , -(9)]
+print(nearZeroVar(predictors))
+#Check for missing values
+#Confirmed No Missing Values
+sapply(df, function(x) sum(is.na(x)))
+```
+
+
+## Process Zero values
+Logic Behind 6 Zero Markers
+* pregnant - not all woman have a baby, likely 0 is a true value, will keep predictor variable
+* glucose - only 5 values are missing, will keep predictor variable, will fill zeros with bag Impute. 
+* pressure - only 35 values are missing, will keep predictor variable, will fill zeros with bag Impute.  
+* triceps - approximately 30% of the data contains 0 values.  Initial predictions show that this predictor does not help the models.  It will be dropped. 
+* insulin - almost 50% of the data has 0 values, will keep predictor variable, will fill zeros with bag Impute.
+* mass - only 11 values are missing, will fill zeros with bag Impute.
+
+
+```{r ZeroPredictors, set.seed(1)}
+# drop triceps as this does not seem to improve the predictions
+df <- df[,-4]
+# replace zeros with NA
+df[df == 0] <- NA
+#Return Pregnant NA back to 0(zerO)
+df$pregnant[is.na(df$pregnant)] <- 0
+# Transform all feature to dummy variables.
+dummy.vars <- dummyVars(~ ., data = df)
+train.dummy <- predict(dummy.vars, df)
+#impute
+pre.process <- preProcess(train.dummy, method = "bagImpute")
+imputed.data <- predict(pre.process, train.dummy)
+#Replace zeros with imputed dummy variables
+df$glucose <- imputed.data[,2]
+df$pressure <- imputed.data[,3]
+df$insulin <- imputed.data[,4]
+df$mass <- imputed.data[,5]
+#Check to make sure that it worked
+zerobycolumn <-colSums(df==0)
+summary(df)
+```
+## Skewness
+Generally values between -1 and 1 are acceptable. Insulin, Age and Pedigree have skewness values beyond these thresholds.  Using the log of these functions removes the skewness. 
+*Note doesn't boxcox correct for this?
+
+```{r Skewness, set.seed(1)}
+#skewness 
+skewness(df$pregnant) #0.898
+skewness(df$glucose) #0.529
+skewness(df$pressure) #0.145
+skewness(df$insulin) #2.026
+skewness(df$mass) #0.595
+skewness(df$pedigree) #1.912
+skewness(df$age) #1.125
+skewness(log(df$age))
+skewness(log(df$pedigree))
+skewness(log(df$insulin))
+```
+
+## Graphical Review of data
+
+```{r Histogram, set.seed(1)}
+#Histograms of Diabetes: Predictor Variables
+n <-df[,1:(ncol(df)-1)] #Predictors are variables 1-8
+par(mfrow = c(3,3)) #Histograms will be 3x3
+for (i in 1:ncol(n))
+{hist(n[ ,i], xlab = names(n[i]), main = paste(names(n[i]), "Histogram"), col="orange")  
+} 
+#Correlation Plot of Diabetes: Predictor Variables
+x <- cor(df[1:ncol(df)-1])
+pairs(x)
+corrplot(x, method="number")
+```
+
+
+```{r BoxPlots, set.seed(1)}
+#Box Plots of Diabetes: Predictor Variables
+boxplot(df$pregnant, main = "Pregnant Boxplot", col = "red")
+boxplot(df$glucose, main = "Glucose Boxplot", col = "red")
+boxplot(df$pressure, main = "Pressure Boxplot", col = "red")
+#boxplot(df$triceps, main = "Triceps Boxplot", col = "red")
+boxplot(df$insulin, main = "Insulin Boxplot", col = "red")
+boxplot(df$mass, main = "Mass Boxplot", col = "red")
+boxplot(df$pedigree, main = "Pedigree Boxplot", col = "red")
+boxplot(df$age, main = "Age Boxplot", col = "red")
+```
+
+## Data Splitting
+Data will be split 80%/20% train/testing.  
+
+```{r SplitData,set.seed(1)}
+#Split Training and Test Data, 80/20
+set.seed(1)
+split <- caret::createDataPartition(y = df$diabetes, times = 1, p = 0.8, list = FALSE)
+#Train_data Split, 80%
+train_data <- df[split,]
+#Test_data Split, 20%
+test_data <- df[-split,]
+#Summary Statistics
+summary(train_data)
+```
+
+## Model Training
+The following models will be trained on the training data.  
+Logistic Regression 
+
+```{r Models, set.seed(1)}
+##################Training Models########################## 
+#Logistic Regression: Training Model
+#No Tuning Parameters for Simple Logistic Regression
+set.seed(1)
+lr_train_data <- caret::train(diabetes ~., data = train_data,
+                          method = "glm",
+                          metric = "ROC",
+                          tuneLength = 10,
+                          trControl = trainControl(method = "cv", number = 10,
+                                                   classProbs = T, summaryFunction = twoClassSummary),
+                          preProcess = c("center","scale", "BoxCox"))
+lr_train_data$preProcess
+lr_train_data
+summary(lr_train_data)
+#Random Forest: Training Model
+set.seed(1)
+rf_train_data <- caret::train(diabetes ~., data = train_data,
+                             method = "ranger",
+                             metric = "ROC",
+                             trControl = trainControl(method = "cv", number = 10,
+                                                      classProbs = T, summaryFunction = twoClassSummary),
+                             preProcess = c("center","scale"))
+rf_train_data
+plot(rf_train_data)
+FinalTree = rf_train_data$finalModel$importance.mode
+#K Nearest Neighbor: Training Model
+set.seed(1)
+knn_train_data <- caret::train(diabetes ~., data = train_data,
+                          method = "knn",
+                          metric = "ROC",
+                          tuneGrid = expand.grid(.k = c(3:30)),
+                          trControl = trainControl(method = "cv", number = 10,
+                                                   classProbs = T, summaryFunction = twoClassSummary),
+                          preProcess = c("center","scale"))
+knn_train_data
+plot(knn_train_data) 
+#Classification and Regression Trees (CART): Training Model
+set.seed(1)
+cart_train_data <- caret::train(diabetes ~., data = train_data,
+                            method = "rpart",
+                            metric = "ROC",
+                            tuneLength = 20,
+                            trControl = trainControl(method = "cv", number = 10,
+                                                     classProbs = TRUE, summaryFunction = twoClassSummary),
+                            preProcess = c("center","scale"))
+cart_train_data
+FinalTree = cart_train_data$finalModel
+rpartTree = as.party(FinalTree)
+dev.new()
+plot(rpartTree)
+#Neural Net
+registerDoParallel(cores=7)
+nnetGrid <- expand.grid(.decay = c(0, 0.01, 0.1), 
+                        .size = c(1:10), 
+                        .bag = FALSE
+)
+set.seed(1)
+nnet_train_data <- caret::train(diabetes ~., data = train_data,
+                                method = "avNNet",
+                                tuneGrid = nnetGrid,
+                                metric = "ROC",
+                                trControl = trainControl(method = "cv", number = 10,
+                                                         classProbs = TRUE, summaryFunction = twoClassSummary),
+                                preProcess = c("center","scale"), 
+                                linout = TRUE, 
+                                trace = FALSE,
+                                MaxNWts = 10 * (ncol(train_data) + 1) + 10 + 1,
+                                maxit = 500)
+nnet_train_data
+plot(nnet_train_data)
+################# Support Vector Machines #####################
+set.seed(1)
+svmFit <- train(diabetes ~., data = train_data, 
+                method = "svmRadial",
+                metric = "ROC", 
+                tuneLength = 14,
+                preProcess = c("center","scale", "BoxCox"), 
+                trControl = trainControl(method = "cv", number = 10,
+                                         classProbs = TRUE, summaryFunction = twoClassSummary))
+svmFit
+plot(svmFit)
+################# Boosted #####################
+gbmGrid <- expand.grid(.interaction.depth = seq(1, 7, by = 2),
+                       .n.trees = seq(100, 1000, by = 50), 
+                       .shrinkage = c(0.01, 0.1),
+                       .n.minobsinnode = 10)
+set.seed(1)
+gbmFit <- train(diabetes ~., data = train_data,
+                method = "gbm",
+                tuneGrid = gbmGrid,
+                preProcess = c("center","scale"),
+                verbose = FALSE, 
+                trControl = trainControl(method = "cv", number = 10,
+                                         classProbs = TRUE, summaryFunction = twoClassSummary))
+gbmFit
+################# Elastinet #####################
+glmnGrid <- expand.grid(.alpha = c(0, .1, .2, .4, .6, .8, 1), 
+                       .lambda = seq(.01, .2, length = 40))
+set.seed(1)
+glmnFit <- train(diabetes ~., data = train_data,
+                method = "glmnet",
+                tuneGrid = glmnGrid,
+                preProcess = c("center","scale", "BoxCox"),
+                metric = "ROC",
+                trControl = trainControl(method = "cv", number = 10,
+                                         classProbs = TRUE, summaryFunction = twoClassSummary))
+glmnFit
+############################ Nearest Shrunken Centroids ##############################
+nscGrid <- data.frame(.threshold = 0:25)
+set.seed(1)
+nscFit <- train(diabetes ~., data = train_data,
+                method = "pam",
+                tuneGrid = nscGrid,
+                preProcess = c("center","scale", "BoxCox"),
+                metric = "ROC",
+                trControl = trainControl(method = "cv", number = 10,
+                                         classProbs = TRUE, summaryFunction = twoClassSummary))
+nscFit
+############################ LDA ##############################
+set.seed(1)
+ldaFit <- train(diabetes ~., data = train_data,
+                method = "lda",
+                metric = "ROC",
+                preProcess = c("center","scale", "BoxCox"),
+                trControl = trainControl(method = "cv", number = 10,
+                                         classProbs = TRUE, summaryFunction = twoClassSummary))
+ldaFit
+#Compare ROC Value by Training Model
+allmodels <- list(Logistic_Regression = lr_train_data, Random_Forest = rf_train_data, KNN = knn_train_data, CART = cart_train_data, NNET = nnet_train_data, SVM = svmFit)
+allmodels2 <- list(NSC = nscFit, LDA = ldaFit, Boost = gbmFit, ENet = glmnFit)
+trainresults <- resamples(allmodels)
+trainresults2 <- resamples(allmodels2)
+#Box Plot: Training Models' ROC Values
+#Logistic Regression Performed Best on Training Data
+bwplot(trainresults, metric="ROC")
+bwplot(trainresults2, metric= "ROC")
+```
+
+
+```{r ConfusionMatrix,set.seed(1)}
+###########################Test Data############################
+#Logistic Regression: Testing Data
+set.seed(1)
+lrpredict <- predict(lr_train_data, test_data)
+#Confusion Matrix Accuracy
+lrconfusion <- confusionMatrix(lrpredict, test_data$diabetes, positive="pos")
+lrconfusion
+#Random Forest: Testing Data
+set.seed(1)
+rfpredict <- predict(rf_train_data, test_data)
+#Confusion Matrix Accuracy
+rfconfusion <- confusionMatrix(rfpredict, test_data$diabetes, positive="pos")
+rfconfusion
+#K Nearest Neighbor: Testing Data
+set.seed(1)
+knnpredict <- predict(knn_train_data, test_data)
+#Confusion Matrix Accuracy
+knnconfusion <- confusionMatrix(knnpredict, test_data$diabetes, positive="pos")
+knnconfusion
+#Classification and Regression Trees (CART): Testing Data
+set.seed(1)
+cartpredict <- predict(cart_train_data, test_data)
+#Confusion Matrix Accuracy
+cartconfusion <- confusionMatrix(cartpredict, test_data$diabetes, positive="pos")
+cartconfusion
+#Neural Net: Testing Data
+set.seed(1)
+nnetpredict <- predict(nnet_train_data, test_data)
+#Confusion Matrix Accuracy
+nnetconfusion <- confusionMatrix(nnetpredict, test_data$diabetes, positive="pos")
+nnetconfusion
+#Support Vector Machines
+set.seed(1)
+svmpredict <- predict(svmFit, test_data)
+#Confusion Matrix Accuracy
+svmconfusion <- confusionMatrix(svmpredict, test_data$diabetes, positive="pos")
+svmconfusion
+#Boost 
+set.seed(1)
+gbmpredict <- predict(gbmFit, test_data)
+#Confusion Matrix Accuracy
+gbmconfusion <- confusionMatrix(gbmpredict, test_data$diabetes, positive="pos")
+gbmconfusion
+# Elastinet 
+set.seed(1)
+glmnpredict <- predict(glmnFit, test_data)
+#Confusion Matrix Accuracy
+glmnconfusion <- confusionMatrix(glmnpredict, test_data$diabetes, positive="pos")
+glmnconfusion
+# Nearest Shrunken Centroid
+set.seed(1)
+nscpredict <- predict(nscFit, test_data)
+#Confusion Matrix Accuracy
+nscconfusion <- confusionMatrix(nscpredict, test_data$diabetes, positive="pos")
+nscconfusion
+#LDA
+set.seed(1)
+ldapredict <- predict(ldaFit, test_data)
+#Confusion Matrix Accuracy
+ldaconfusion <- confusionMatrix(ldapredict, test_data$diabetes, positive="pos")
+ldaconfusion
+```
+
+
+```{r FinalResult,set.seed(1)}
+#Comparing Test Results
+lrfinal<- c(lrconfusion$byClass['Sensitivity'], lrconfusion$byClass['Specificity'], lrconfusion$byClass['Precision'], 
+            lrconfusion$byClass['Recall'], lrconfusion$byClass['F1'])
+rffinal <- c(rfconfusion$byClass['Sensitivity'], rfconfusion$byClass['Specificity'], rfconfusion$byClass['Precision'], 
+             rfconfusion$byClass['Recall'], rfconfusion$byClass['F1'])
+knnfinal <- c(knnconfusion$byClass['Sensitivity'], knnconfusion$byClass['Specificity'], knnconfusion$byClass['Precision'], 
+              knnconfusion$byClass['Recall'], knnconfusion$byClass['F1'])
+cartfinal <- c(cartconfusion$byClass['Sensitivity'], cartconfusion$byClass['Specificity'], cartconfusion$byClass['Precision'], 
+               cartconfusion$byClass['Recall'], cartconfusion$byClass['F1'])
+nnetfinal <- c(nnetconfusion$byClass['Sensitivity'], nnetconfusion$byClass['Specificity'], nnetconfusion$byClass['Precision'], 
+               nnetconfusion$byClass['Recall'], nnetconfusion$byClass['F1'])
+svmfinal <- c(svmconfusion$byClass['Sensitivity'], svmconfusion$byClass['Specificity'], svmconfusion$byClass['Precision'], 
+              svmconfusion$byClass['Recall'], svmconfusion$byClass['F1'])
+gbmfinal <- c(gbmconfusion$byClass['Sensitivity'], gbmconfusion$byClass['Specificity'], gbmconfusion$byClass['Precision'], 
+              gbmconfusion$byClass['Recall'], gbmconfusion$byClass['F1'])
+glmnfinal <- c(glmnconfusion$byClass['Sensitivity'], glmnconfusion$byClass['Specificity'], glmnconfusion$byClass['Precision'], 
+              glmnconfusion$byClass['Recall'], glmnconfusion$byClass['F1'])
+nscfinal <- c(nscconfusion$byClass['Sensitivity'], nscconfusion$byClass['Specificity'], nscconfusion$byClass['Precision'], 
+              nscconfusion$byClass['Recall'], nscconfusion$byClass['F1'])
+ldafinal <- c(ldaconfusion$byClass['Sensitivity'], ldaconfusion$byClass['Specificity'], ldaconfusion$byClass['Precision'], 
+              ldaconfusion$byClass['Recall'], ldaconfusion$byClass['F1'])
+allmodelsfinal <- data.frame(rbind(lrfinal, rffinal, knnfinal, cartfinal, nnetfinal, svmfinal, gbmfinal, nscfinal, ldafinal))
+names(allmodelsfinal) <- c("Sensitivity", "Specificity", "Precision", "Recall", "F1")
+allmodelsfinal 
+
+lrfinal2<- c(lrconfusion$overall['Accuracy'],lrconfusion$byClass['Sensitivity'], lrconfusion$byClass['Specificity'], lrconfusion$byClass['Precision'], 
+            lrconfusion$byClass['Recall'], lrconfusion$byClass['F1'])
+rffinal2 <- c(rfconfusion$overall['Accuracy'],rfconfusion$byClass['Sensitivity'], rfconfusion$byClass['Specificity'], rfconfusion$byClass['Precision'], 
+             rfconfusion$byClass['Recall'], rfconfusion$byClass['F1'])
+knnfinal2 <- c(knnconfusion$overall['Accuracy'],knnconfusion$byClass['Sensitivity'], knnconfusion$byClass['Specificity'], knnconfusion$byClass['Precision'], 
+              knnconfusion$byClass['Recall'], knnconfusion$byClass['F1'])
+cartfinal2 <- c(cartconfusion$overall['Accuracy'],cartconfusion$byClass['Sensitivity'], cartconfusion$byClass['Specificity'], cartconfusion$byClass['Precision'], 
+               cartconfusion$byClass['Recall'], cartconfusion$byClass['F1'])
+allmodelsfinal2 <- data.frame(rbind(lrfinal2, rffinal2, knnfinal2, cartfinal2))
+names(allmodelsfinal2) <- c("Accuracy","Sensitivity", "Specificity", "Precision", "Recall", "F1")
+allmodelsfinal
+allmodelsfinal2 
+#To find the Most Important Predictors within the Diabetes Dataset
+set.seed(1)
+importance <- randomForest(diabetes ~., data = train_data, importance=TRUE) # fit the random forest with default parameter
+caret::varImp(importance) # get variable importance, based on mean decrease in accuracy
+```
