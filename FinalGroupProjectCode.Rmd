@@ -388,13 +388,13 @@ allmodelsfinal
 
 lrfinal2<- c(lrconfusion$overall['Accuracy'],lrconfusion$byClass['Sensitivity'], lrconfusion$byClass['Specificity'], lrconfusion$byClass['Precision'], 
             lrconfusion$byClass['Recall'], lrconfusion$byClass['F1'])
-rffinal2 <- c(rfconfusion$overall['Accuracy'],rfconfusion$byClass['Sensitivity'], rfconfusion$byClass['Specificity'], rfconfusion$byClass['Precision'], 
-             rfconfusion$byClass['Recall'], rfconfusion$byClass['F1'])
+nnetfinal2 <- c(nnetconfusion$overall['Accuracy'],nnetconfusion$byClass['Sensitivity'], nnetconfusion$byClass['Specificity'], nnetconfusion$byClass['Precision'], 
+               nnetconfusion$byClass['Recall'], nnetconfusion$byClass['F1'])
 knnfinal2 <- c(knnconfusion$overall['Accuracy'],knnconfusion$byClass['Sensitivity'], knnconfusion$byClass['Specificity'], knnconfusion$byClass['Precision'], 
               knnconfusion$byClass['Recall'], knnconfusion$byClass['F1'])
 cartfinal2 <- c(cartconfusion$overall['Accuracy'],cartconfusion$byClass['Sensitivity'], cartconfusion$byClass['Specificity'], cartconfusion$byClass['Precision'], 
                cartconfusion$byClass['Recall'], cartconfusion$byClass['F1'])
-allmodelsfinal2 <- data.frame(rbind(lrfinal2, rffinal2, knnfinal2, cartfinal2))
+allmodelsfinal2 <- data.frame(rbind(lrfinal2, nnetfinal2, knnfinal2, cartfinal2))
 names(allmodelsfinal2) <- c("Accuracy","Sensitivity", "Specificity", "Precision", "Recall", "F1")
 allmodelsfinal
 allmodelsfinal2 
